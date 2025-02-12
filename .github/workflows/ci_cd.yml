@@ -1,0 +1,57 @@
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/*.md'  # Optional: Ignore pushes that only update docs
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: 3.10
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+      - name: Run Tests
+        run: |
+          source venv/bin/activate
+          pytest
+
+  deploy:
+    name: Deploy to Azure VM
+    needs: test
+    if: github.event_name == 'push' && github.event.pusher.name != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Deploy to Azure VM
+        env:
+          HOST: ${{ secrets.VM_IP }}
+          USER: ${{ secrets.VM_USERNAME }}
+          SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+        run: |
+          echo "$SSH_KEY" > private_key.pem
+          chmod 600 private_key.pem
+
+          ssh -o StrictHostKeyChecking=no -i private_key.pem $USER@$HOST << 'EOF'
+            cd /var/www/fastapi-book-project
+            git pull origin main
+            source venv/bin/activate
+            pip install -r requirements.txt
+            sudo systemctl restart fastapi
+            sudo systemctl restart nginx
+          EOF
